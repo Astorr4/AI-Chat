@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Корпоративный AI</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+
+    <!-- Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- Code highlight -->
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+
+<div class="app">
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="logo">AI Assistant</div>
+
+        <button class="new-chat" onclick="newChat()">+ Новый диалог</button>
+
+        <div class="history" id="history"></div>
+    </div>
+
+    <!-- Chat -->
+    <div class="chat-area">
+
+        <div class="chat-header">
+            <div>Корпоративный AI</div>
+        </div>
+
+        <div id="chat-box" class="chat-box"></div>
+
+        <div class="chat-input">
+            <textarea id="message" rows="1"
+                      placeholder="Напишите сообщение..."></textarea>
+            <button id="sendBtn">➤</button>
+        </div>
+
+    </div>
+
+</div>
+
+<script src="/static/script.js"></script>
+</body>
+</html>

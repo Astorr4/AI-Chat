@@ -1,0 +1,461 @@
+body {
+    margin: 0;
+    font-family: Inter, "Segoe UI", sans-serif;
+    background: #0f1117;
+    color: #e6e6e6;
+}
+
+.app {
+    display: flex;
+    height: 100vh;
+}
+
+/* =========================
+   SIDEBAR
+========================= */
+
+.sidebar {
+    width: 260px;
+    background: #151821;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    border-right: 1px solid #222630;
+}
+
+.logo {
+    font-weight: 600;
+    margin-bottom: 20px;
+}
+
+.new-chat {
+    background: #3b82f6;
+    border: none;
+    padding: 10px;
+    border-radius: 8px;
+    color: white;
+    cursor: pointer;
+    margin-bottom: 20px;
+}
+
+.history {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s ease;
+}
+
+.history-item:hover {
+    background: rgba(255,255,255,0.05);
+}
+
+.history-item.active {
+    background: rgba(59,130,246,0.2);
+}
+
+.history-title {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.delete-btn {
+    opacity: 0;
+    font-size: 13px;
+    color: #888;
+    transition: 0.2s ease;
+    margin-left: 8px;
+}
+
+.history-item:hover .delete-btn {
+    opacity: 1;
+}
+
+.delete-btn:hover {
+    color: #ff4d4d;
+}
+
+/* =========================
+   CHAT
+========================= */
+
+.chat-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid #222630;
+}
+
+.chat-box {
+    flex: 1;
+    padding: 50px 120px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+/* =========================
+   MESSAGE
+========================= */
+
+.message {
+    position: relative;
+    max-width: 720px;
+    line-height: 1.6;
+    font-size: 15px;
+    animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.message {
+    opacity: 0;
+    transform: translateY(10px);
+    animation: messageSlide 0.25s ease forwards;
+}
+
+@keyframes messageSlide {
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+.message:hover {
+    transform: translateY(-1px);
+    transition: 0.15s ease;
+}
+
+
+/* Пользователь */
+.user {
+    align-self: flex-end;
+    background: #5b21b6;
+    padding: 18px 22px;
+    border-radius: 18px;
+    color: white;
+}
+
+/* Ассистент */
+.assistant {
+    align-self: flex-start;
+    background: #1c1f2a;
+    padding: 26px 22px 18px 22px; /* увеличенный верхний отступ */
+    border-radius: 18px;
+    border: 1px solid #2a2f3a;
+    transition: background 0.2s ease;
+}
+
+.assistant:has(.typing) {
+    background: #171a23;
+}
+
+/* Код */
+.assistant pre {
+    background: #11131a;
+    padding: 14px;
+    border-radius: 10px;
+    overflow-x: auto;
+}
+
+.assistant, .user {
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    backdrop-filter: blur(4px);
+}
+
+/* =========================
+   COPY BUTTON
+========================= */
+
+.copy-icon {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    background: transparent;
+    border: none;
+    color: rgba(255,255,255,0.6);
+    cursor: pointer;
+    font-size: 14px;
+    opacity: 0;
+    transition: 0.2s ease;
+}
+
+.assistant:hover .copy-icon {
+    opacity: 1;
+}
+
+.copy-icon:hover {
+    color: white;
+}
+
+/* =========================
+   SOURCES + CONFIDENCE
+========================= */
+
+.sources {
+    margin-top: 18px;
+    font-size: 13px;
+    background: rgba(255,255,255,0.03);
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid #2a2f3a;
+    opacity: 0.9;
+}
+
+/* =========================
+   INPUT
+========================= */
+
+.chat-input {
+    display: flex;
+    padding: 20px 40px;
+    border-top: 1px solid #222630;
+}
+
+.chat-input textarea {
+    flex: 1;
+    resize: none;
+    background: #1a1d26;
+    border: 1px solid #2a2f3a;
+    border-radius: 10px;
+    padding: 12px;
+    color: white;
+    font-size: 14px;
+    outline: none;
+    overflow: hidden;
+    transition: border 0.2s ease, box-shadow 0.2s ease;
+}
+
+.chat-input textarea:focus {
+    border: 1px solid #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
+}
+.chat-input button {
+    margin-left: 10px;
+    padding: 12px 18px;
+    border-radius: 10px;
+    border: none;
+    background: #3b82f6;
+    color: white;
+    cursor: pointer;
+}
+
+/* =========================
+   THINKING
+========================= */
+
+@keyframes blink {
+    50% { opacity: 0; }
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+th, td {
+    border: 1px solid #2a2f3a;
+    padding: 8px;
+}
+
+th {
+    background: #151821;
+}
+/* =========================
+   CONFIDENCE TOOLTIP
+========================= */
+
+.confidence {
+    margin-top: 10px;
+    font-weight: 500;
+    position: relative;
+    cursor: help;
+}
+
+.confidence::after {
+    content: "Уверенность отражает семантическую близость найденных фрагментов к вашему запросу.";
+    position: absolute;
+    bottom: 130%;
+    left: 0;
+    width: 260px;
+    background: #11131a;
+    color: #ccc;
+    font-size: 12px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #2a2f3a;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 100;
+}
+
+.confidence:hover::after {
+    opacity: 1;
+}
+
+/* =========================
+   NEW CHAT WELCOME
+========================= */
+
+.chat-welcome {
+    text-align: center;
+    margin-top: 120px;
+    opacity: 0.75;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+.chat-welcome h2 {
+    font-weight: 500;
+    margin-bottom: 12px;
+}
+
+.chat-welcome p {
+    margin: 6px 0;
+    opacity: 0.85;
+}
+
+/* =========================
+   WELCOME ANIMATION
+========================= */
+
+.chat-welcome {
+    text-align: center;
+    margin-top: 120px;
+    opacity: 0;
+    transform: translateY(10px);
+    animation: welcomeFadeIn 0.35s ease forwards;
+}
+
+@keyframes welcomeFadeIn {
+    to {
+        opacity: 0.75;
+        transform: translateY(0);
+    }
+}
+
+/* Плавное появление текста ассистента */
+.assistant-content {
+    animation: fadeToken 0.15s ease-in-out;
+}
+
+@keyframes fadeToken {
+    from { opacity: 0.4; }
+    to { opacity: 1; }
+}
+.rename-input {
+    width: 100%;
+    background: #1a1d26;
+    border: 1px solid #3b82f6;
+    border-radius: 6px;
+    color: white;
+    padding: 4px 6px;
+    font-size: 13px;
+}
+
+/* =========================
+   TYPING INDICATOR
+========================= */
+
+.typing {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0;
+}
+
+.typing-dot {
+    width: 6px;
+    height: 6px;
+    background: #888;
+    border-radius: 50%;
+    animation: typingBounce 1.2s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes typingBounce {
+    0%, 80%, 100% {
+        transform: scale(0.6);
+        opacity: 0.4;
+    }
+    40% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+/* =========================
+   LOW CONFIDENCE WARNING
+========================= */
+
+.low-confidence-warning {
+    margin-top: 14px;
+    padding: 12px 14px;
+    background: rgba(255, 193, 7, 0.08);
+    border: 1px solid rgba(255, 193, 7, 0.4);
+    border-radius: 10px;
+    font-size: 13px;
+    color: #ffcc66;
+}
+
+/* =========================
+   NO RESULTS BLOCK
+========================= */
+
+.no-results {
+    text-align: center;
+    padding: 30px 20px;
+    opacity: 0.85;
+}
+
+.no-results-icon {
+    font-size: 28px;
+    margin-bottom: 12px;
+}
+
+.no-results-title {
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.no-results-text {
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+.no-results ul {
+    list-style: none;
+    padding: 0;
+    margin-top: 10px;
+}
+
+.no-results li {
+    margin: 6px 0;
+}
+#confidenceTrendChart {
+    min-height: 300px;
+}
