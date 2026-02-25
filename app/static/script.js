@@ -7,8 +7,62 @@ marked.setOptions({
     gfm: true
 });
 
+function sanitizeHtml(html) {
+    if (window.DOMPurify) {
+        return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+    }
+
+    // Безопасный fallback: показываем контент как plain text,
+    // если санитайзер недоступен.
+    const temp = document.createElement("div");
+    temp.textContent = html;
+    return temp.innerHTML;
+}
+
 let sessionId = localStorage.getItem("session_id");
 let sessions = JSON.parse(localStorage.getItem("sessions") || "{}");
+
+const STREAM_RENDER_INTERVAL_MS = 80;
+const STREAM_SAVE_INTERVAL_MS = 500;
+
+function createThrottle(fn, wait) {
+    let lastTime = 0;
+    let timer = null;
+
+    const throttled = (...args) => {
+        const now = Date.now();
+        const remaining = wait - (now - lastTime);
+
+        if (remaining <= 0) {
+            if (timer) {
+                clearTimeout(timer);
+                timer = null;
+            }
+            lastTime = now;
+            fn(...args);
+            return;
+        }
+
+        if (!timer) {
+            timer = setTimeout(() => {
+                timer = null;
+                lastTime = Date.now();
+                fn(...args);
+            }, remaining);
+        }
+    };
+
+    throttled.flush = (...args) => {
+        if (timer) {
+            clearTimeout(timer);
+            timer = null;
+        }
+        lastTime = Date.now();
+        fn(...args);
+    };
+
+    return throttled;
+}
 
 // =========================
 // DOM READY
@@ -170,6 +224,22 @@ async function sendMessage() {
             body: JSON.stringify({ question: message })
         });
 
+        if (!response.ok) {
+            let errorMessage = `HTTP ${response.status}`;
+            try {
+                const payload = await response.json();
+                if (payload && payload.error) {
+                    errorMessage = payload.error;
+                }
+            } catch (_) {}
+
+            throw new Error(errorMessage);
+        }
+
+        if (!response.body) {
+            throw new Error("Пустой ответ сервера");
+        }
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
 
@@ -177,6 +247,55 @@ async function sendMessage() {
         let contentText = "";
         let sources = [];
         let confidence = null;
+
+        const renderAssistantContentThrottled = createThrottle(() => {
+            const typing = contentDiv.querySelector(".typing");
+            if (typing) typing.remove();
+
+            if (contentText.trim() ===
+                "В документации информация не найдена.") {
+
+                contentDiv.innerHTML = `
+                    <div class="no-results">
+                        <div class="no-results-icon">🔍</div>
+                        <div class="no-results-title">
+                            Информация не найдена
+                        </div>
+                        <div class="no-results-text">
+                            Попробуйте:
+                            <ul>
+                                <li>Уточнить формулировку</li>
+                                <li>Добавить больше контекста</li>
+                                <li>Разбить вопрос на части</li>
+                            </ul>
+                        </div>
+                    </div>
+                `;
+            } else {
+
+                const parsedHtml = marked.parse(contentText);
+                const safeHtml = sanitizeHtml(parsedHtml);
+                contentDiv.innerHTML = safeHtml;
+
+                contentDiv
+                    .querySelectorAll("pre code")
+                    .forEach(block => {
+                        hljs.highlightElement(block);
+                    });
+            }
+        }, STREAM_RENDER_INTERVAL_MS);
+
+        const persistAssistantMessageThrottled = createThrottle(() => {
+            let lastMsg =
+                sessions[sessionId].messages[
+                    sessions[sessionId].messages.length - 1
+                ];
+
+            lastMsg.content = contentText;
+            lastMsg.html = sanitizeHtml(contentDiv.innerHTML);
+
+            saveSessions();
+        }, STREAM_SAVE_INTERVAL_MS);
 
         while (true) {
 
@@ -201,55 +320,12 @@ async function sendMessage() {
                 } catch (e) {}
             }
 
-            // Убираем typing indicator при первом токене
-            const typing = contentDiv.querySelector(".typing");
-            if (typing) typing.remove();
-
-            // =========================
-            // ОБРАБОТКА "НЕ НАЙДЕНО"
-            // =========================
-            if (contentText.trim() ===
-                "В документации информация не найдена.") {
-
-                contentDiv.innerHTML = `
-                    <div class="no-results">
-                        <div class="no-results-icon">🔍</div>
-                        <div class="no-results-title">
-                            Информация не найдена
-                        </div>
-                        <div class="no-results-text">
-                            Попробуйте:
-                            <ul>
-                                <li>Уточнить формулировку</li>
-                                <li>Добавить больше контекста</li>
-                                <li>Разбить вопрос на части</li>
-                            </ul>
-                        </div>
-                    </div>
-                `;
-            } else {
-
-                contentDiv.innerHTML =
-                    marked.parse(contentText);
-
-                // оптимизированная подсветка
-                contentDiv
-                    .querySelectorAll("pre code")
-                    .forEach(block => {
-                        hljs.highlightElement(block);
-                    });
-            }
-
-            let lastMsg =
-                sessions[sessionId].messages[
-                    sessions[sessionId].messages.length - 1
-                ];
-
-            lastMsg.content = contentText;
-            lastMsg.html = contentDiv.innerHTML;
-
-            saveSessions();
+            renderAssistantContentThrottled();
+            persistAssistantMessageThrottled();
         }
+
+        renderAssistantContentThrottled.flush();
+        persistAssistantMessageThrottled.flush();
 
         // =========================
         // ДОБАВЛЯЕМ WARNING + META
@@ -318,7 +394,7 @@ async function sendMessage() {
             contentDiv.appendChild(metaBlock);
         }
 
-        lastMsg.html = contentDiv.innerHTML;
+        lastMsg.html = sanitizeHtml(contentDiv.innerHTML);
         saveSessions();
 
         addCopyButton(assistantMessage);
@@ -363,6 +439,25 @@ async function sendMessage() {
 
     } catch (err) {
         console.error("Chat error:", err);
+
+        const typing = contentDiv.querySelector(".typing");
+        if (typing) typing.remove();
+
+        contentDiv.innerHTML = `
+            <div class="no-results">
+                <div class="no-results-icon">⚠</div>
+                <div class="no-results-title">Ошибка запроса</div>
+                <div class="no-results-text">${sanitizeHtml(String(err.message || err))}</div>
+            </div>
+        `;
+
+        let lastMsg =
+            sessions[sessionId].messages[
+                sessions[sessionId].messages.length - 1
+            ];
+        lastMsg.content = "";
+        lastMsg.html = sanitizeHtml(contentDiv.innerHTML);
+        saveSessions();
     }
 
     focusInput();
@@ -383,7 +478,7 @@ function appendMessage(role, text) {
     if (role === "assistant") {
         const contentDiv = document.createElement("div");
         contentDiv.className = "assistant-content";
-        contentDiv.innerHTML = text;
+        contentDiv.innerHTML = sanitizeHtml(text);
         div.appendChild(contentDiv);
     } else {
         div.innerText = text;
@@ -424,10 +519,10 @@ function loadSession(id) {
             if (contentDiv) {
 
                 if (msg.html && msg.html.trim() !== "") {
-                    contentDiv.innerHTML = msg.html;
+                    contentDiv.innerHTML = sanitizeHtml(msg.html);
                 } else {
-                    contentDiv.innerHTML =
-                        marked.parse(msg.content || "");
+                    const parsedHtml = marked.parse(msg.content || "");
+                    contentDiv.innerHTML = sanitizeHtml(parsedHtml);
                 }
 
                 contentDiv

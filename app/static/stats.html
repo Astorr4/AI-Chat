@@ -217,6 +217,15 @@
 
 <script>
 
+const chartInstances = {};
+
+function destroyChart(id) {
+    if (chartInstances[id]) {
+        chartInstances[id].destroy();
+        delete chartInstances[id];
+    }
+}
+
 async function loadStats() {
 
     const from = document.getElementById("fromDate").value;
@@ -305,8 +314,9 @@ function updateHealth(list) {
 }
 
 function createBarChart(id, dataset) {
+    destroyChart(id);
     const ctx = document.getElementById(id).getContext("2d");
-    new Chart(ctx, {
+    chartInstances[id] = new Chart(ctx, {
         type: "bar",
         data: {
             labels: Object.keys(dataset),
@@ -324,8 +334,9 @@ function createBarChart(id, dataset) {
 }
 
 function createPieChart(id, dataset) {
+    destroyChart(id);
     const ctx = document.getElementById(id).getContext("2d");
-    new Chart(ctx, {
+    chartInstances[id] = new Chart(ctx, {
         type: "pie",
         data: {
             labels: Object.keys(dataset),
@@ -338,8 +349,9 @@ function createPieChart(id, dataset) {
 }
 
 function createScatterChart(id, dataset) {
+    destroyChart(id);
     const ctx = document.getElementById(id).getContext("2d");
-    new Chart(ctx, {
+    chartInstances[id] = new Chart(ctx, {
         type: "scatter",
         data: {
             datasets: [{
@@ -369,11 +381,9 @@ function createConfidenceTrendChart(id, dataset) {
 
     const ctx = canvas.getContext("2d");
 
-    if (window.confidenceTrendChartInstance) {
-        window.confidenceTrendChartInstance.destroy();
-    }
+    destroyChart(id);
 
-    window.confidenceTrendChartInstance = new Chart(ctx, {
+    chartInstances[id] = new Chart(ctx, {
         type: "line",
         data: {
             labels: dataset.map(d => d.date),

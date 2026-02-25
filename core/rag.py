@@ -2,6 +2,7 @@ import numpy as np
 import re
 from core.reranker import Reranker, keyword_score
 import difflib
+from collections import OrderedDict
 from config import (
     SIMILARITY_STRONG,
     SIMILARITY_WEAK,
@@ -17,8 +18,29 @@ class RAG:
         self.store = vector_store
         self.llm = llm
         self.reranker = Reranker()
-        self.last_query_vector = None
+        self.session_last_query_vectors = OrderedDict()
+        self.max_session_memory = 1000
         self.topic_shift_count = 0
+
+    def _get_last_query_vector(self, session_id=None):
+        if not session_id:
+            return None
+
+        vector = self.session_last_query_vectors.get(session_id)
+        if vector is not None:
+            self.session_last_query_vectors.move_to_end(session_id)
+
+        return vector
+
+    def _set_last_query_vector(self, session_id, query_vector):
+        if not session_id:
+            return
+
+        self.session_last_query_vectors[session_id] = query_vector
+        self.session_last_query_vectors.move_to_end(session_id)
+
+        while len(self.session_last_query_vectors) > self.max_session_memory:
+            self.session_last_query_vectors.popitem(last=False)
 
     # ----------------------------------------------------
     # Query expansion (улучшено)
@@ -252,7 +274,7 @@ class RAG:
     # ----------------------------------------------------
     # Основной поиск (улучшен)
     # ----------------------------------------------------
-    def search(self, query, top_k=3):
+    def search(self, query, top_k=3, session_id=None):
         if len(query.split()) <= 2:
             return self.lexical_search(query, top_k)
 
@@ -270,8 +292,10 @@ class RAG:
         similarity = None
         topic_mode = "new"
 
-        if self.last_query_vector is not None:
-            similarity = float(np.dot(query_vector, self.last_query_vector))
+        last_query_vector = self._get_last_query_vector(session_id)
+
+        if last_query_vector is not None:
+            similarity = float(np.dot(query_vector, last_query_vector))
 
             if similarity > SIMILARITY_STRONG:
                 topic_mode = "strong"
@@ -280,8 +304,8 @@ class RAG:
             else:
                 topic_mode = "new"
 
-        # сохраняем текущий вектор
-        self.last_query_vector = query_vector
+        # сохраняем текущий вектор для конкретной сессии
+        self._set_last_query_vector(session_id, query_vector)
 
         # ==============================
         # 3. Detect query type

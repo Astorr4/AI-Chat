@@ -21,12 +21,8 @@ def get_connection():
 # ==========================
 
 def create_session(session_id):
-    with get_connection() as conn:
-
-        conn.execute(
-            "INSERT OR IGNORE INTO sessions (id, created_at) VALUES (?, ?)",
-            (session_id, time.time())
-        )
+    # Backward-compatible alias
+    save_session(session_id)
 
 
 
@@ -300,6 +296,22 @@ def init_db():
             )
         """)
 
+        # ==========================
+        # INDEXES (analytics/perf)
+        # ==========================
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_session_created_at ON messages(session_id, created_at)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rag_metrics_created_at ON rag_metrics(created_at)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rag_metrics_rejected_reason ON rag_metrics(rejected_reason)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rag_metrics_topic_mode ON rag_metrics(topic_mode)"
+        )
+
 
     # 🔥 Авто-миграция (если таблица старая)
     migrate_rag_metrics()
@@ -313,17 +325,17 @@ def save_rag_metrics(
         confidence,
         avg_score,
         min_score,
-        max_score,
-        coverage,
-        threshold,
-        sources_count,
-        context_chars,
-        retrieval_time,
-        llm_time,
-        total_time,
-        answer_length,
-        is_followup,
-        memory_size,
+        max_score=0.0,
+        coverage=0.0,
+        threshold=0.0,
+        sources_count=0,
+        context_chars=0,
+        retrieval_time=0.0,
+        llm_time=0.0,
+        total_time=0.0,
+        answer_length=0,
+        is_followup=0,
+        memory_size=0,
         rejected_reason=None,
         similarity=None,
         topic_mode=None
