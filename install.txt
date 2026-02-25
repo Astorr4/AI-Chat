@@ -1,0 +1,11 @@
+для переиндексации базы команда:
+python -m scripts.index_to_qdrant
+
+Для старта сервера перейти в папку с llama.cpp и моделью
+cd C:\llama
+
+Запустить сервер
+.\llama-server.exe -m Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf -t 8 -c 4096 --port 8080
+
+В питоне запустить UI
+uvicorn app.main:app --host 0.0.0.0 --port 8000
