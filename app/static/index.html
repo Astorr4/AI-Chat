@@ -38,9 +38,24 @@
         <div id="chat-box" class="chat-box"></div>
 
         <div class="chat-input">
-            <textarea id="message" rows="1"
-                      placeholder="Напишите сообщение..."></textarea>
-            <button id="sendBtn">➤</button>
+            <div class="chat-input-row">
+                <button id="analyzeFileBtn" type="button" class="analyze-file-btn" title="Анализ файла" aria-label="Анализ файла">
+                    <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true" focusable="false">
+                        <rect x="6" y="5" width="40" height="54" rx="6" fill="#f2f2f2"></rect>
+                        <path d="M6 19L20 5v8a6 6 0 0 1-6 6z" fill="#b8c3e6"></path>
+                        <path d="M10 29h11M10 37h11M10 45h11" stroke="#0b2d86" stroke-width="3" stroke-linecap="round"></path>
+                        <circle cx="38" cy="37" r="13" fill="#bfc9ea"></circle>
+                        <circle cx="38" cy="37" r="9" fill="#6ac4c7" stroke="#0b2d86" stroke-width="3"></circle>
+                        <path d="M46 45l7 7" stroke="#0b2d86" stroke-width="4" stroke-linecap="round"></path>
+                        <rect x="52" y="50" width="10" height="6" rx="3" transform="rotate(45 52 50)" fill="#ff6c62"></rect>
+                    </svg>
+                </button>
+                <input id="fileInput" type="file" accept=".pdf,.docx,.xlsx" hidden>
+                <textarea id="message" rows="1"
+                          placeholder="Напишите сообщение..."></textarea>
+                <button id="sendBtn">➤</button>
+            </div>
+            <div id="fileStatus" class="file-status">Режим: общий чат</div>
         </div>
 
     </div>

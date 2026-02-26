@@ -42,6 +42,45 @@ class RAG:
         while len(self.session_last_query_vectors) > self.max_session_memory:
             self.session_last_query_vectors.popitem(last=False)
 
+    def detect_intent(self, query: str):
+        q = (query or "").lower().strip()
+
+        compare_markers = ["сравни", "разница", "чем отличается", "vs", "или"]
+        procedure_markers = ["как", "шаг", "инструкция", "порядок", "процедура"]
+        summary_markers = ["кратко", "резюме", "итог", "суммируй", "выжимка"]
+        followup_markers = ["а", "и", "тогда", "это", "его", "ее", "их", "подробнее"]
+
+        if any(m in q for m in compare_markers):
+            return "compare"
+        if any(m in q for m in summary_markers):
+            return "summary"
+        if any(m in q for m in procedure_markers):
+            return "procedure"
+
+        tokens = re.findall(r"\w+", q)
+        if len(tokens) <= 3 and any(t in followup_markers for t in tokens):
+            return "followup"
+
+        return "fact"
+
+    def rewrite_query(
+            self,
+            query: str,
+            chat_memory=None,
+            session_summary: str = None,
+            topic_mode=None,
+    ):
+        base = self.normalize_query(query)
+        if not base:
+            base = (query or "").strip()
+
+        expanded = self.expand_query(base, chat_memory or [], topic_mode=topic_mode)
+
+        if session_summary and len(expanded.split()) <= 5:
+            return f"{expanded} | контекст диалога: {session_summary[:220]}"
+
+        return expanded
+
     # ----------------------------------------------------
     # Query expansion (улучшено)
     # ----------------------------------------------------
@@ -184,7 +223,7 @@ class RAG:
             [c["vector"] for c in candidates]
         )
         candidate_scores = np.array(
-            [c["score"] for c in candidates]
+            [c.get("hybrid_score", c.get("score", 0)) for c in candidates]
         )
         query_embedding = np.array(query_embedding)
 
@@ -274,7 +313,7 @@ class RAG:
     # ----------------------------------------------------
     # Основной поиск (улучшен)
     # ----------------------------------------------------
-    def search(self, query, top_k=3, session_id=None):
+    def search(self, query, top_k=3, session_id=None, intent=None):
         if len(query.split()) <= 2:
             return self.lexical_search(query, top_k)
 
@@ -313,28 +352,35 @@ class RAG:
 
         query_type = self.detect_query_type(query)
 
+        if intent == "procedure":
+            query_type = "text"
+        elif intent == "summary":
+            query_type = "general"
+
         # ==============================
         # 4. Metadata-aware search
         # ==============================
 
+        recall_limit = min(max(top_k * 8, 20), 60)
+
         if query_type in ["numeric", "excel"]:
             results = self.store.search(
                 query_vector,
-                limit=10,
+                limit=recall_limit,
                 doc_type="excel_row"
             )
 
         elif query_type == "text":
             results = self.store.search(
                 query_vector,
-                limit=10,
+                limit=recall_limit,
                 doc_type="text_chunk"
             )
 
         else:
             results = self.store.search(
                 query_vector,
-                limit=10
+                limit=recall_limit
             )
 
         if not results:
@@ -392,7 +438,14 @@ class RAG:
         reranked = self.reranker.rerank(
             query,
             candidates,
-            top_k=top_k
+            top_k=min(len(candidates), max(top_k * 4, 12))
+        )
+
+        diversified = self.mmr(
+            query_embedding=query_vector,
+            candidates=reranked,
+            top_k=min(top_k, len(reranked)),
+            lambda_param=0.75,
         )
 
         # ==============================
@@ -405,7 +458,7 @@ class RAG:
             threshold = 0.15
 
         filtered = [
-            doc for doc in reranked
+            doc for doc in diversified
             if doc.get("hybrid_score", 0) > threshold
         ]
 

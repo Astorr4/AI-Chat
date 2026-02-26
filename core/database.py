@@ -1,5 +1,6 @@
 import sqlite3
 import time
+import re
 from config import DB_PATH
 
 
@@ -46,6 +47,42 @@ def get_last_messages(session_id, limit=4):
         rows = cursor.fetchall()
 
         return list(reversed(rows))
+
+
+def get_relevant_messages(session_id, query, limit=8):
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            SELECT id, role, content
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY id DESC
+            LIMIT 50
+            """,
+            (session_id,)
+        )
+        rows = cursor.fetchall()
+
+    if not rows:
+        return []
+
+    query_tokens = set(re.findall(r"\w+", (query or "").lower()))
+
+    scored = []
+    for idx, row in enumerate(rows):
+        content = (row["content"] or "")
+        content_tokens = set(re.findall(r"\w+", content.lower()))
+        overlap = len(query_tokens & content_tokens)
+        recency_bonus = max(0, 10 - idx) * 0.1
+        score = overlap + recency_bonus
+        scored.append((score, row))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_rows = [row for _, row in scored[:limit]]
+
+    # Возвращаем в реальном хронологическом порядке (по id)
+    top_rows.sort(key=lambda r: r["id"])
+    return top_rows
 
 
 # ==========================
@@ -207,6 +244,21 @@ def migrate_rag_metrics():
         if "threshold" not in columns:
             cursor.execute("ALTER TABLE rag_metrics ADD COLUMN threshold REAL")
 
+        # Индексы, зависящие от мигрируемых колонок, создаём только после проверки схемы
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rag_metrics_created_at ON rag_metrics(created_at)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rag_metrics_rejected_reason ON rag_metrics(rejected_reason)"
+        )
+
+        cursor.execute("PRAGMA table_info(rag_metrics)")
+        final_columns = [row[1] for row in cursor.fetchall()]
+        if "topic_mode" in final_columns:
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rag_metrics_topic_mode ON rag_metrics(topic_mode)"
+            )
+
 
 def init_db():
     with get_connection() as conn:
@@ -302,15 +354,7 @@ def init_db():
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_session_created_at ON messages(session_id, created_at)"
         )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_rag_metrics_created_at ON rag_metrics(created_at)"
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_rag_metrics_rejected_reason ON rag_metrics(rejected_reason)"
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_rag_metrics_topic_mode ON rag_metrics(topic_mode)"
-        )
+        # Индексы rag_metrics, зависящие от миграций, создаются в migrate_rag_metrics()
 
 
     # 🔥 Авто-миграция (если таблица старая)

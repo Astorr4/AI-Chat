@@ -9,6 +9,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
 from docx import Document
 import openpyxl
+import time
 
 from config import EMBED_MODEL_PATH, DOCS_DIR, QDRANT_PATH, COLLECTION_NAME
 
@@ -126,14 +127,24 @@ def load_document(path):
 
 def main():
     model = SentenceTransformer(str(EMBED_MODEL_PATH))
-    client = QdrantClient(path=str(QDRANT_PATH))
+    client = None
 
-    BATCH_SIZE = 256  # 👈 добавить сюда
+    try:
+        client = QdrantClient(path=str(QDRANT_PATH))
+    except RuntimeError as e:
+        message = str(e)
+        if "already accessed by another instance" in message:
+            print(
+                "\n[INDEX ERROR] Папка qdrant_storage занята другим процессом.\n"
+                "Остановите приложение/процесс, использующий Qdrant, и повторите команду:\n"
+                "python -m scripts.index_to_qdrant\n"
+            )
+            return
+        raise
 
     points = []
     point_id = 0
-    model = SentenceTransformer(str(EMBED_MODEL_PATH))
-    client = QdrantClient(path=str(QDRANT_PATH))
+    BATCH_SIZE = 256
 
     # Пересоздаём коллекцию
     client.recreate_collection(
@@ -143,13 +154,6 @@ def main():
             distance=Distance.COSINE
         ),
     )
-
-    BATCH_SIZE = 256
-
-    if len(points) >= BATCH_SIZE:
-        client.upsert(collection_name=COLLECTION_NAME, points=points)
-        points = []
-    point_id = 0
 
     for filename in os.listdir(DOCS_DIR):
 
@@ -242,15 +246,15 @@ def main():
             collection_name=COLLECTION_NAME,
             points=points
         )
+    if point_id > 0:
         print("Индексация в Qdrant завершена.")
     else:
         print("Нет данных для индексации.")
-    if points:
-        client.upsert(
-            collection_name=COLLECTION_NAME,
-            points=points
-        )
-    client.close()
+
+    if client is not None:
+        # Небольшая пауза перед закрытием, чтобы избежать гонок на Windows lock
+        time.sleep(0.2)
+        client.close()
 
 
 if __name__ == "__main__":

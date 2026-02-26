@@ -225,8 +225,60 @@ body {
 
 .chat-input {
     display: flex;
+    flex-direction: column;
+    gap: 10px;
     padding: 20px 40px;
     border-top: 1px solid #222630;
+}
+
+.input-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.analyze-file-btn {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: #b7c0d1;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.analyze-file-btn:hover {
+    color: #7fb2ff;
+    background: rgba(59,130,246,0.1);
+}
+
+.analyze-file-btn.active {
+    color: #8cc2ff;
+    background: transparent;
+}
+
+.file-status {
+    font-size: 12px;
+    color: #9aa4b2;
+    text-align: right;
+}
+
+.file-status.active {
+    color: #8cc2ff;
+}
+
+.chat-input-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
 }
 
 .chat-input textarea {
@@ -247,8 +299,7 @@ body {
     border: 1px solid #3b82f6;
     box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
 }
-.chat-input button {
-    margin-left: 10px;
+.chat-input #sendBtn {
     padding: 12px 18px;
     border-radius: 10px;
     border: none;

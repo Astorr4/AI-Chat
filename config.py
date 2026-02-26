@@ -56,11 +56,35 @@ LOG_FILE = LOGS_DIR / "app.log"
 # llama.cpp / OpenAI-compatible endpoint
 LLM_URL = "http://127.0.0.1:8080/v1/chat/completions"
 
+# Разрешать только локальный LLM endpoint (без внешней сети)
+LLM_LOCAL_ONLY = True
+
 MAX_TOKENS = 3000
 TEMPERATURE = 0.2
 
+# Таймаут одного HTTP-запроса к LLM
+LLM_TIMEOUT_SECONDS = 120
+
+# Retry / backoff
+LLM_RETRY_ATTEMPTS = 3
+LLM_RETRY_BASE_DELAY = 0.6
+LLM_RETRY_MAX_DELAY = 4.0
+
+# Circuit breaker
+LLM_CIRCUIT_BREAKER_THRESHOLD = 5
+LLM_CIRCUIT_BREAKER_RESET_SECONDS = 30
+
 # Максимальное количество одновременных LLM-запросов
 LLM_CONCURRENCY_LIMIT = 2
+
+# Максимум активных генераций в памяти (очередь)
+GENERATION_MAX_ACTIVE = 100
+
+# TTL состояния генерации в памяти
+GENERATION_TTL_SECONDS = 900
+
+# Окно идемпотентности (повтор той же реплики)
+IDEMPOTENCY_WINDOW_SECONDS = 15
 
 
 # ==========================================================

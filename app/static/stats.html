@@ -140,6 +140,43 @@
         <div class="kpi-title">Доля уточняющих вопросов</div>
         <div class="kpi-value" id="followup_rate"></div>
 </div>
+
+    <div class="kpi-card">
+        <div class="kpi-title">Retrieval hit-rate</div>
+        <div class="kpi-value" id="retrieval_hit_rate"></div>
+    </div>
+
+    <div class="kpi-card">
+        <div class="kpi-title">Groundedness</div>
+        <div class="kpi-value" id="groundedness"></div>
+    </div>
+
+    <div class="kpi-card">
+        <div class="kpi-title">Factual error rate</div>
+        <div class="kpi-value" id="factual_error_rate"></div>
+    </div>
+
+    <div class="kpi-card">
+        <div class="kpi-title">p95 latency (сек)</div>
+        <div class="kpi-value" id="p95_latency"></div>
+    </div>
+
+    <div class="kpi-card">
+        <div class="kpi-title">Stream completion rate</div>
+        <div class="kpi-value" id="stream_completion_rate"></div>
+    </div>
+
+    <div class="kpi-card">
+        <div class="kpi-title">LLM failure recovery</div>
+        <div class="kpi-value" id="llm_failure_recovery_rate"></div>
+    </div>
+</div>
+
+<!-- RELEASE GATE -->
+<div class="chart-box" style="margin-bottom:25px;">
+    <h3>Release gate</h3>
+    <div id="releaseGateStatus" class="chart-description"></div>
+    <ul id="releaseGateChecks"></ul>
 </div>
 
 <!-- HEALTH SUMMARY -->
@@ -268,11 +305,25 @@ async function loadStats() {
             ((data.followup_rate || 0) * 100).toFixed(1) + "%";
     }
 
+    // Phase 5 KPI
+    const kpi = data.kpi || {};
+    const quality = kpi.quality || {};
+    const conversational = kpi.conversational || {};
+    const reliability = kpi.reliability || {};
+
+    setText("retrieval_hit_rate", pct(quality.retrieval_hit_rate));
+    setText("groundedness", pct(quality.groundedness));
+    setText("factual_error_rate", pct(quality.factual_error_rate));
+    setText("p95_latency", num(reliability.p95_latency, 2));
+    setText("stream_completion_rate", pct(reliability.stream_completion_rate));
+    setText("llm_failure_recovery_rate", pct(reliability.llm_failure_recovery_rate));
+
     // =========================
     // Health summary
     // =========================
 
     updateHealth(data.health_summary);
+    updateReleaseGate(data.release_gate);
 
     // =========================
     // ГРАФИКИ
@@ -301,6 +352,47 @@ async function loadStats() {
             data.confidence_trend
         );
     }
+}
+
+function pct(value) {
+    const v = Number(value || 0);
+    return (v * 100).toFixed(1) + "%";
+}
+
+function num(value, digits = 2) {
+    const v = Number(value || 0);
+    return v.toFixed(digits);
+}
+
+function setText(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerText = value;
+}
+
+function updateReleaseGate(releaseGate) {
+    const statusEl = document.getElementById("releaseGateStatus");
+    const listEl = document.getElementById("releaseGateChecks");
+    if (!statusEl || !listEl) return;
+
+    listEl.innerHTML = "";
+
+    if (!releaseGate) {
+        statusEl.innerText = "Данные недоступны";
+        return;
+    }
+
+    statusEl.innerHTML = releaseGate.passed
+        ? "✅ Gate пройден: релиз разрешён"
+        : "⛔ Gate не пройден: релиз заблокирован";
+
+    (releaseGate.checks || []).forEach(check => {
+        const li = document.createElement("li");
+        const mark = check.passed ? "✅" : "❌";
+        const val = typeof check.value === "number" ? check.value.toFixed(3) : String(check.value);
+        li.innerText = `${mark} [${check.domain}] ${check.metric}: ${val} (требование ${check.threshold.op} ${check.threshold.value})`;
+        listEl.appendChild(li);
+    });
 }
 
 function updateHealth(list) {

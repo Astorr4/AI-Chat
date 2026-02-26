@@ -1,6 +1,69 @@
 import sqlite3
+from statistics import quantiles
 
 from core.database import DB_PATH
+
+
+KPI_THRESHOLDS = {
+    "quality": {
+        "retrieval_hit_rate": {"op": ">=", "value": 0.75},
+        "groundedness": {"op": ">=", "value": 0.90},
+        "factual_error_rate": {"op": "<=", "value": 0.03},
+    },
+    "conversational": {
+        "followup_success_rate": {"op": ">=", "value": 0.70},
+        "clarification_resolution_rate": {"op": ">=", "value": 0.60},
+    },
+    "reliability": {
+        "p95_latency": {"op": "<=", "value": 20.0},
+        "stream_completion_rate": {"op": ">=", "value": 0.97},
+        "llm_failure_recovery_rate": {"op": ">=", "value": 0.80},
+    },
+}
+
+
+def _compute_p95(values):
+    cleaned = [v for v in values if v is not None]
+    if not cleaned:
+        return 0.0
+    if len(cleaned) == 1:
+        return float(cleaned[0])
+    return float(quantiles(cleaned, n=100, method="inclusive")[94])
+
+
+def _check_threshold(metric_value, threshold):
+    op = threshold["op"]
+    target = threshold["value"]
+    if op == ">=":
+        return metric_value >= target
+    if op == "<=":
+        return metric_value <= target
+    return False
+
+
+def _build_release_gate(kpi_payload):
+    checks = []
+
+    for domain, metrics in KPI_THRESHOLDS.items():
+        for metric_name, threshold in metrics.items():
+            value = kpi_payload[domain][metric_name]
+            passed = _check_threshold(value, threshold)
+            checks.append(
+                {
+                    "domain": domain,
+                    "metric": metric_name,
+                    "value": value,
+                    "threshold": threshold,
+                    "passed": passed,
+                }
+            )
+
+    failed = [c for c in checks if not c["passed"]]
+    return {
+        "passed": len(failed) == 0,
+        "checks": checks,
+        "failed_checks": failed,
+    }
 
 
 def build_rag_stats(from_date: str = None, to_date: str = None):
@@ -262,6 +325,162 @@ def build_rag_stats(from_date: str = None, to_date: str = None):
     avg_max_score = row[0] if row and row[0] else 0
     avg_coverage = row[1] if row and row[1] else 0
     avg_threshold = row[2] if row and row[2] else 0
+
+    cursor.execute(f"SELECT total_time FROM rag_metrics {where_clause}", params)
+    total_time_samples = [
+        t for (t,) in cursor.fetchall()
+        if t is not None
+    ]
+
+    p95_latency = _compute_p95(total_time_samples)
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM rag_metrics
+        {where_clause}
+        {"AND" if where_clause else "WHERE"} filtered_docs > 0
+        """,
+        params,
+    )
+    retrieval_hits = cursor.fetchone()[0]
+    retrieval_hit_rate = (retrieval_hits / total_requests) if total_requests else 0.0
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM rag_metrics
+        {where_clause}
+        {"AND" if where_clause else "WHERE"} rejected_reason = 'verification_invalid'
+        """,
+        params,
+    )
+    factual_errors = cursor.fetchone()[0]
+    factual_error_rate = (factual_errors / total_requests) if total_requests else 0.0
+
+    grounded_count = max(total_requests - factual_errors, 0)
+    groundedness = (grounded_count / total_requests) if total_requests else 0.0
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(*),
+               SUM(CASE WHEN rejected_reason IS NULL THEN 1 ELSE 0 END)
+        FROM rag_metrics
+        {where_clause}
+        {"AND" if where_clause else "WHERE"} is_followup = 1
+        """,
+        params,
+    )
+    followup_total, followup_success = cursor.fetchone()
+    followup_total = followup_total or 0
+    followup_success = followup_success or 0
+    followup_success_rate = (
+        followup_success / followup_total if followup_total else 0.0
+    )
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM rag_metrics c
+        WHERE c.rejected_reason = 'low_confidence_clarify'
+          {"AND date(c.created_at) BETWEEN ? AND ?" if from_date and to_date else ""}
+        """,
+        [from_date, to_date] if from_date and to_date else [],
+    )
+    clarification_total = cursor.fetchone()[0] or 0
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM rag_metrics c
+        WHERE c.rejected_reason = 'low_confidence_clarify'
+          AND EXISTS (
+              SELECT 1
+              FROM rag_metrics n
+              WHERE n.session_id = c.session_id
+                AND n.id > c.id
+                AND n.rejected_reason IS NULL
+          )
+          {"AND date(c.created_at) BETWEEN ? AND ?" if from_date and to_date else ""}
+        """,
+        [from_date, to_date] if from_date and to_date else [],
+    )
+    clarification_resolved = cursor.fetchone()[0] or 0
+    clarification_resolution_rate = (
+        clarification_resolved / clarification_total if clarification_total else 0.0
+    )
+
+    # Техническая завершённость стрима (прокси):
+    # считаем незавершёнными только инфраструктурные/LLM-сбои,
+    # а не продуктовые reject'ы retrieval/verification.
+    cursor.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM rag_metrics
+        {where_clause}
+        {"AND" if where_clause else "WHERE"}
+            (
+                rejected_reason LIKE 'llm_%'
+                OR rejected_reason = 'circuit_open'
+                OR rejected_reason = 'queue_overflow'
+            )
+        """,
+        params,
+    )
+    stream_technical_failures = cursor.fetchone()[0] or 0
+    stream_completion_rate = (
+        1.0 - (stream_technical_failures / total_requests)
+        if total_requests
+        else 0.0
+    )
+
+    llm_failures_total = stream_technical_failures
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM rag_metrics f
+        WHERE (
+                f.rejected_reason LIKE 'llm_%'
+                OR f.rejected_reason = 'circuit_open'
+                OR f.rejected_reason = 'queue_overflow'
+              )
+          {"AND date(f.created_at) BETWEEN ? AND ?" if from_date and to_date else ""}
+          AND EXISTS (
+              SELECT 1
+              FROM rag_metrics n
+              WHERE n.session_id = f.session_id
+                AND n.id > f.id
+                AND n.rejected_reason IS NULL
+          )
+        """,
+        [from_date, to_date] if from_date and to_date else [],
+    )
+    llm_failures_recovered = cursor.fetchone()[0] or 0
+
+    llm_failure_recovery_rate = (
+        llm_failures_recovered / llm_failures_total
+        if llm_failures_total
+        else 1.0
+    )
+
+    kpi = {
+        "quality": {
+            "retrieval_hit_rate": retrieval_hit_rate,
+            "groundedness": groundedness,
+            "factual_error_rate": factual_error_rate,
+        },
+        "conversational": {
+            "followup_success_rate": followup_success_rate,
+            "clarification_resolution_rate": clarification_resolution_rate,
+        },
+        "reliability": {
+            "p95_latency": p95_latency,
+            "stream_completion_rate": stream_completion_rate,
+            "llm_failure_recovery_rate": llm_failure_recovery_rate,
+        },
+    }
+    release_gate = _build_release_gate(kpi)
     conn.close()
 
     return {
@@ -291,4 +510,7 @@ def build_rag_stats(from_date: str = None, to_date: str = None):
             "avg_coverage": avg_coverage,
             "avg_threshold": avg_threshold,
         },
+        "kpi": kpi,
+        "release_gate": release_gate,
+        "kpi_thresholds": KPI_THRESHOLDS,
     }

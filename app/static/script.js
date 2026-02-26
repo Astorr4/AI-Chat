@@ -21,6 +21,9 @@ function sanitizeHtml(html) {
 
 let sessionId = localStorage.getItem("session_id");
 let sessions = JSON.parse(localStorage.getItem("sessions") || "{}");
+let pendingRequests = JSON.parse(localStorage.getItem("pending_requests") || "{}");
+let analyzeFileEnabled = false;
+let currentAnalysisFileName = null;
 
 const STREAM_RENDER_INTERVAL_MS = 80;
 const STREAM_SAVE_INTERVAL_MS = 500;
@@ -64,6 +67,382 @@ function createThrottle(fn, wait) {
     return throttled;
 }
 
+function savePendingRequests() {
+    localStorage.setItem("pending_requests", JSON.stringify(pendingRequests));
+}
+
+function setFileStatus(text, isEnabled) {
+    const fileStatus = document.getElementById("fileStatus");
+    const analyzeBtn = document.getElementById("analyzeFileBtn");
+
+    if (fileStatus) {
+        fileStatus.textContent = text;
+        fileStatus.classList.toggle("active", !!isEnabled);
+    }
+
+    if (analyzeBtn) {
+        analyzeBtn.classList.toggle("active", !!isEnabled);
+    }
+}
+
+function updateSessionAnalysisState(enabled, fileName) {
+    if (!sessionId || !sessions[sessionId]) return;
+    sessions[sessionId].analysis = {
+        enabled: !!enabled,
+        fileName: fileName || null,
+    };
+    saveSessions();
+}
+
+async function uploadFileForAnalysis(file) {
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const headers = {};
+    if (sessionId) {
+        headers["X-Session-Id"] = sessionId;
+    }
+
+    const response = await fetch("/file-analysis/upload", {
+        method: "POST",
+        headers,
+        body: formData,
+    });
+
+    if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+            const payload = await response.json();
+            if (payload && payload.error) {
+                errorMessage = payload.error;
+            }
+        } catch (_) {}
+        throw new Error(errorMessage);
+    }
+
+    const payload = await response.json();
+
+    const serverSessionId = response.headers.get("X-Session-Id")
+        || payload.session_id
+        || sessionId
+        || ("session_" + Date.now());
+
+    if (!sessions[serverSessionId]) {
+        sessions[serverSessionId] = {
+            title: `Анализ: ${payload.file_name || file.name}`.substring(0, 40),
+            messages: [],
+            created: Date.now(),
+            analysis: {
+                enabled: true,
+                fileName: payload.file_name || file.name,
+            },
+        };
+    }
+
+    sessionId = serverSessionId;
+    localStorage.setItem("session_id", sessionId);
+
+    analyzeFileEnabled = true;
+    currentAnalysisFileName = payload.file_name || file.name;
+
+    updateSessionAnalysisState(true, currentAnalysisFileName);
+    renderHistory();
+
+    const truncatedSuffix = payload.truncated
+        ? " (контекст укорочен)"
+        : "";
+    setFileStatus(
+        `Режим: анализ файла (${currentAnalysisFileName})${truncatedSuffix}`,
+        true
+    );
+}
+
+function setupFileAnalysisUI() {
+    const analyzeBtn = document.getElementById("analyzeFileBtn");
+    const fileInput = document.getElementById("fileInput");
+
+    if (!analyzeBtn || !fileInput) return;
+
+    analyzeBtn.addEventListener("click", () => fileInput.click());
+
+    fileInput.addEventListener("change", async (e) => {
+        const selectedFile = e.target.files && e.target.files[0]
+            ? e.target.files[0]
+            : null;
+
+        if (!selectedFile) return;
+
+        try {
+            setFileStatus("Загрузка файла для анализа...", false);
+            await uploadFileForAnalysis(selectedFile);
+        } catch (err) {
+            analyzeFileEnabled = false;
+            currentAnalysisFileName = null;
+            updateSessionAnalysisState(false, null);
+            setFileStatus(`Ошибка анализа файла: ${String(err.message || err)}`, false);
+        } finally {
+            fileInput.value = "";
+        }
+    });
+
+    if (sessionId && sessions[sessionId] && sessions[sessionId].analysis?.enabled) {
+        analyzeFileEnabled = true;
+        currentAnalysisFileName = sessions[sessionId].analysis.fileName || null;
+        if (currentAnalysisFileName) {
+            setFileStatus(`Режим: анализ файла (${currentAnalysisFileName})`, true);
+        } else {
+            setFileStatus("Режим: анализ файла", true);
+        }
+    } else {
+        setFileStatus("Режим: общий чат", false);
+    }
+}
+
+function registerPendingRequest(requestId, payload) {
+    pendingRequests[requestId] = payload;
+    savePendingRequests();
+}
+
+function clearPendingRequest(requestId) {
+    if (pendingRequests[requestId]) {
+        delete pendingRequests[requestId];
+        savePendingRequests();
+    }
+}
+
+function getOrCreateAssistantContainer(targetSessionId, assistantIndex) {
+    const chat = document.getElementById("chat-box");
+    if (!chat) return null;
+
+    const existingNode = chat.querySelector(`.message.assistant[data-assistant-index="${assistantIndex}"]`);
+    if (existingNode) {
+        return {
+            assistantMessage: existingNode,
+            contentDiv: existingNode.querySelector(".assistant-content"),
+        };
+    }
+
+    const assistantMessage = appendMessage("assistant", "");
+    if (!assistantMessage) return null;
+
+    assistantMessage.dataset.assistantIndex = String(assistantIndex);
+    const contentDiv = assistantMessage.querySelector(".assistant-content");
+    if (contentDiv) {
+        const typingIndicator = document.createElement("div");
+        typingIndicator.className = "typing";
+        typingIndicator.innerHTML = `
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+        `;
+        contentDiv.appendChild(typingIndicator);
+    }
+
+    return { assistantMessage, contentDiv };
+}
+
+function applyAssistantMeta(contentDiv, sources, confidence) {
+    if (!contentDiv) return;
+
+    if (confidence !== null && confidence < 0.5) {
+        const warning = document.createElement("div");
+        warning.className = "low-confidence-warning";
+        warning.innerHTML = `
+            ⚠ Ответ может быть неточным.
+            Попробуйте уточнить формулировку запроса.
+        `;
+        contentDiv.appendChild(warning);
+    }
+
+    if (sources.length > 0 || confidence !== null) {
+        const metaBlock = document.createElement("div");
+        metaBlock.className = "sources";
+
+        let html = "";
+
+        if (sources.length > 0) {
+            html += "<strong>Источники:</strong><br>";
+            html += sources.map(s => `• ${s}`).join("<br>");
+        }
+
+        if (confidence !== null && confidence !== undefined) {
+            const percent = Math.round(confidence * 100);
+            let levelClass = "conf-low";
+            if (percent >= 80) levelClass = "conf-high";
+            else if (percent >= 60) levelClass = "conf-medium";
+
+            html += `
+                <div class="confidence ${levelClass}">
+                    Уверенность: ${percent}%
+                </div>
+            `;
+        }
+
+        metaBlock.innerHTML = html;
+        contentDiv.appendChild(metaBlock);
+    }
+}
+
+async function consumeAssistantStream({
+    reader,
+    currentSessionId,
+    assistantIndex,
+    contentDiv,
+    assistantMessage,
+}) {
+    const decoder = new TextDecoder();
+
+    let fullText = "";
+    let contentText = "";
+    let sources = [];
+    let confidence = null;
+
+    const renderAssistantContentThrottled = createThrottle(() => {
+        const typing = contentDiv.querySelector(".typing");
+        if (typing) typing.remove();
+
+        if (contentText.trim() === "В документации информация не найдена.") {
+            contentDiv.innerHTML = `
+                <div class="no-results">
+                    <div class="no-results-icon">🔍</div>
+                    <div class="no-results-title">
+                        Информация не найдена
+                    </div>
+                    <div class="no-results-text">
+                        Попробуйте:
+                        <ul>
+                            <li>Уточнить формулировку</li>
+                            <li>Добавить больше контекста</li>
+                            <li>Разбить вопрос на части</li>
+                        </ul>
+                    </div>
+                </div>
+            `;
+        } else {
+            const parsedHtml = marked.parse(contentText);
+            const safeHtml = sanitizeHtml(parsedHtml);
+            contentDiv.innerHTML = safeHtml;
+
+            contentDiv
+                .querySelectorAll("pre code")
+                .forEach(block => {
+                    hljs.highlightElement(block);
+                });
+        }
+    }, STREAM_RENDER_INTERVAL_MS);
+
+    const persistAssistantMessageThrottled = createThrottle(() => {
+        const msg = sessions[currentSessionId]?.messages?.[assistantIndex];
+        if (!msg) return;
+
+        msg.content = contentText;
+        msg.html = sanitizeHtml(contentDiv.innerHTML);
+        saveSessions();
+    }, STREAM_SAVE_INTERVAL_MS);
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        fullText += decoder.decode(value);
+
+        const confSplit = fullText.split("###CONFIDENCE###");
+        const confidencePart = confSplit.length > 1
+            ? confSplit.slice(1).join("###CONFIDENCE###")
+            : "";
+        const mainPart = confSplit[0];
+
+        if (confidencePart) {
+            const parsedConfidence = parseFloat(confidencePart.trim());
+            if (!Number.isNaN(parsedConfidence)) {
+                confidence = parsedConfidence;
+            }
+        }
+
+        const sourceSplit = mainPart.split("###SOURCES###");
+        const answerWithMeta = sourceSplit[0];
+
+        if (sourceSplit.length > 1) {
+            try {
+                sources = JSON.parse(sourceSplit[1].trim());
+            } catch (e) {}
+        }
+
+        contentText = answerWithMeta;
+
+        renderAssistantContentThrottled();
+        persistAssistantMessageThrottled();
+    }
+
+    renderAssistantContentThrottled.flush();
+    persistAssistantMessageThrottled.flush();
+
+    const msg = sessions[currentSessionId]?.messages?.[assistantIndex];
+    if (msg) {
+        msg.sources = sources;
+        msg.confidence = confidence;
+    }
+
+    applyAssistantMeta(contentDiv, sources, confidence);
+
+    if (msg) {
+        msg.html = sanitizeHtml(contentDiv.innerHTML);
+        saveSessions();
+    }
+
+    addCopyButton(assistantMessage);
+}
+
+async function resumePendingStreamsForCurrentSession() {
+    if (!sessionId || !sessions[sessionId]) return;
+
+    const entries = Object.entries(pendingRequests)
+        .filter(([, p]) => p && p.sessionId === sessionId);
+
+    for (const [requestId, payload] of entries) {
+        try {
+            const ui = getOrCreateAssistantContainer(sessionId, payload.assistantIndex);
+            if (!ui || !ui.contentDiv) {
+                clearPendingRequest(requestId);
+                continue;
+            }
+
+            // Check if this is a file analysis request by checking the session state
+            const isFileAnalysisMode = !!(
+                sessions[sessionId]?.analysis?.enabled
+            );
+
+            const endpoint = isFileAnalysisMode 
+                ? `/file-analysis-stream/${encodeURIComponent(requestId)}`
+                : `/chat-stream/${encodeURIComponent(requestId)}`;
+
+            const response = await fetch(endpoint, {
+                headers: {
+                    "X-Session-Id": sessionId,
+                },
+            });
+            if (!response.ok || !response.body) {
+                clearPendingRequest(requestId);
+                continue;
+            }
+
+            await consumeAssistantStream({
+                reader: response.body.getReader(),
+                currentSessionId: sessionId,
+                assistantIndex: payload.assistantIndex,
+                contentDiv: ui.contentDiv,
+                assistantMessage: ui.assistantMessage,
+            });
+
+            clearPendingRequest(requestId);
+        } catch (_) {
+            // Оставляем pending, чтобы можно было повторить после следующего reload
+        }
+    }
+}
+
 // =========================
 // DOM READY
 // =========================
@@ -100,6 +479,9 @@ document.addEventListener("DOMContentLoaded", function () {
         showNewChatWelcome();
     }
 
+    resumePendingStreamsForCurrentSession();
+    setupFileAnalysisUI();
+
     focusInput();
 });
 
@@ -121,7 +503,10 @@ function focusInput() {
 
 function newChat() {
     sessionId = null;
+    analyzeFileEnabled = false;
+    currentAnalysisFileName = null;
     localStorage.removeItem("session_id");
+    setFileStatus("Режим: общий чат", false);
     renderHistory();
     showNewChatWelcome();
     focusInput();
@@ -167,10 +552,21 @@ async function sendMessage() {
         sessions[sessionId] = {
             title: message.substring(0, 40),
             messages: [],
-            created: Date.now()
+            created: Date.now(),
+            analysis: {
+                enabled: false,
+                fileName: null,
+            },
         };
         localStorage.setItem("session_id", sessionId);
     }
+
+    const isFileAnalysisMode = !!(
+        analyzeFileEnabled
+        && sessions[sessionId]
+        && sessions[sessionId].analysis
+        && sessions[sessionId].analysis.enabled
+    );
 
     // USER MESSAGE
     sessions[sessionId].messages.push({
@@ -198,6 +594,10 @@ async function sendMessage() {
     saveSessions();
 
     const assistantMessage = appendMessage("assistant", "");
+    const assistantIndex = sessions[sessionId].messages.length - 1;
+    if (assistantMessage) {
+        assistantMessage.dataset.assistantIndex = String(assistantIndex);
+    }
     const contentDiv =
         assistantMessage.querySelector(".assistant-content");
 
@@ -215,7 +615,7 @@ async function sendMessage() {
 
     try {
 
-        const response = await fetch("/chat", {
+        const response = await fetch(isFileAnalysisMode ? "/file-analysis/chat" : "/chat", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -240,164 +640,27 @@ async function sendMessage() {
             throw new Error("Пустой ответ сервера");
         }
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        let fullText = "";
-        let contentText = "";
-        let sources = [];
-        let confidence = null;
-
-        const renderAssistantContentThrottled = createThrottle(() => {
-            const typing = contentDiv.querySelector(".typing");
-            if (typing) typing.remove();
-
-            if (contentText.trim() ===
-                "В документации информация не найдена.") {
-
-                contentDiv.innerHTML = `
-                    <div class="no-results">
-                        <div class="no-results-icon">🔍</div>
-                        <div class="no-results-title">
-                            Информация не найдена
-                        </div>
-                        <div class="no-results-text">
-                            Попробуйте:
-                            <ul>
-                                <li>Уточнить формулировку</li>
-                                <li>Добавить больше контекста</li>
-                                <li>Разбить вопрос на части</li>
-                            </ul>
-                        </div>
-                    </div>
-                `;
-            } else {
-
-                const parsedHtml = marked.parse(contentText);
-                const safeHtml = sanitizeHtml(parsedHtml);
-                contentDiv.innerHTML = safeHtml;
-
-                contentDiv
-                    .querySelectorAll("pre code")
-                    .forEach(block => {
-                        hljs.highlightElement(block);
-                    });
-            }
-        }, STREAM_RENDER_INTERVAL_MS);
-
-        const persistAssistantMessageThrottled = createThrottle(() => {
-            let lastMsg =
-                sessions[sessionId].messages[
-                    sessions[sessionId].messages.length - 1
-                ];
-
-            lastMsg.content = contentText;
-            lastMsg.html = sanitizeHtml(contentDiv.innerHTML);
-
-            saveSessions();
-        }, STREAM_SAVE_INTERVAL_MS);
-
-        while (true) {
-
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            fullText += decoder.decode(value);
-
-            const confSplit = fullText.split("###CONFIDENCE###");
-            const mainPart = confSplit[0];
-
-            if (confSplit.length > 1) {
-                confidence = parseFloat(confSplit[1].trim());
-            }
-
-            const sourceSplit = mainPart.split("###SOURCES###");
-            contentText = sourceSplit[0];
-
-            if (sourceSplit.length > 1) {
-                try {
-                    sources = JSON.parse(sourceSplit[1].trim());
-                } catch (e) {}
-            }
-
-            renderAssistantContentThrottled();
-            persistAssistantMessageThrottled();
+        const requestId = response.headers.get("X-Request-Id");
+        if (requestId) {
+            registerPendingRequest(requestId, {
+                sessionId,
+                assistantIndex,
+                createdAt: Date.now(),
+                isFileAnalysis: isFileAnalysisMode
+            });
         }
 
-        renderAssistantContentThrottled.flush();
-        persistAssistantMessageThrottled.flush();
+        await consumeAssistantStream({
+            reader: response.body.getReader(),
+            currentSessionId: sessionId,
+            assistantIndex,
+            contentDiv,
+            assistantMessage,
+        });
 
-        // =========================
-        // ДОБАВЛЯЕМ WARNING + META
-        // =========================
-
-        let lastMsg =
-            sessions[sessionId].messages[
-                sessions[sessionId].messages.length - 1
-            ];
-
-        lastMsg.sources = sources;
-        lastMsg.confidence = confidence;
-
-        // ⚠ Предупреждение при низкой уверенности
-        if (confidence !== null &&
-            confidence < 0.5 &&
-            contentDiv) {
-
-            const warning =
-                document.createElement("div");
-            warning.className = "low-confidence-warning";
-            warning.innerHTML = `
-                ⚠ Ответ может быть неточным.
-                Попробуйте уточнить формулировку запроса.
-            `;
-            contentDiv.appendChild(warning);
+        if (requestId) {
+            clearPendingRequest(requestId);
         }
-
-        // Блок источников и confidence
-        if ((sources.length > 0 ||
-             confidence !== null) &&
-             contentDiv) {
-
-            const metaBlock =
-                document.createElement("div");
-            metaBlock.className = "sources";
-
-            let html = "";
-
-            if (sources.length > 0) {
-                html += "<strong>Источники:</strong><br>";
-                html += sources.map(s =>
-                    `• ${s}`).join("<br>");
-            }
-
-            if (confidence !== null &&
-                confidence !== undefined) {
-
-                const percent =
-                    Math.round(confidence * 100);
-
-                let levelClass = "conf-low";
-                if (percent >= 80)
-                    levelClass = "conf-high";
-                else if (percent >= 60)
-                    levelClass = "conf-medium";
-
-                html += `
-                    <div class="confidence ${levelClass}">
-                        Уверенность: ${percent}%
-                    </div>
-                `;
-            }
-
-            metaBlock.innerHTML = html;
-            contentDiv.appendChild(metaBlock);
-        }
-
-        lastMsg.html = sanitizeHtml(contentDiv.innerHTML);
-        saveSessions();
-
-        addCopyButton(assistantMessage);
 
         // =========================
         // АВТОГЕНЕРАЦИЯ ЗАГОЛОВКА
@@ -498,6 +761,19 @@ function loadSession(id) {
 
     sessionId = id;
     localStorage.setItem("session_id", id);
+
+    const analysis = sessions[id]?.analysis;
+    analyzeFileEnabled = !!analysis?.enabled;
+    currentAnalysisFileName = analysis?.fileName || null;
+    if (analyzeFileEnabled) {
+        if (currentAnalysisFileName) {
+            setFileStatus(`Режим: анализ файла (${currentAnalysisFileName})`, true);
+        } else {
+            setFileStatus("Режим: анализ файла", true);
+        }
+    } else {
+        setFileStatus("Режим: общий чат", false);
+    }
 
     const chat = document.getElementById("chat-box");
     if (!chat) return;
@@ -656,7 +932,10 @@ function deleteSession(id) {
 
     if (id === sessionId) {
         sessionId = null;
+        analyzeFileEnabled = false;
+        currentAnalysisFileName = null;
         localStorage.removeItem("session_id");
+        setFileStatus("Режим: общий чат", false);
         showNewChatWelcome();
     }
 
