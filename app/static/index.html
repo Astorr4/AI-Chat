@@ -2,9 +2,15 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Корпоративный AI</title>
 
     <link rel="stylesheet" href="/static/style.css">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
 
     <!-- Markdown -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -20,45 +26,52 @@
 <div class="app">
 
     <!-- Sidebar -->
-    <div class="sidebar">
+    <aside class="sidebar">
         <div class="logo">AI Assistant</div>
 
-        <button class="new-chat">+ Новый диалог</button>
+        <button class="new-chat">Новый диалог</button>
 
-        <div class="history" id="history"></div>
-    </div>
+        <nav class="history" id="history" aria-label="История чатов">
+        </nav>
+    </aside>
 
     <!-- Chat -->
-    <div class="chat-area">
+    <main class="chat-area">
 
-        <div class="chat-header">
-            <div>Корпоративный AI</div>
+        <header class="chat-header">
+            <h1>Корпоративный AI</h1>
+        </header>
+
+        <div id="chat-box" class="chat-box" role="log" aria-live="polite">
+            <!-- Messages will be inserted here -->
         </div>
-
-        <div id="chat-box" class="chat-box"></div>
 
         <div class="chat-input">
             <div class="chat-input-row">
                 <button id="analyzeFileBtn" type="button" class="analyze-file-btn" title="Анализ файла" aria-label="Анализ файла">
-                    <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true" focusable="false">
-                        <rect x="6" y="5" width="40" height="54" rx="6" fill="#f2f2f2"></rect>
-                        <path d="M6 19L20 5v8a6 6 0 0 1-6 6z" fill="#b8c3e6"></path>
-                        <path d="M10 29h11M10 37h11M10 45h11" stroke="#0b2d86" stroke-width="3" stroke-linecap="round"></path>
-                        <circle cx="38" cy="37" r="13" fill="#bfc9ea"></circle>
-                        <circle cx="38" cy="37" r="9" fill="#6ac4c7" stroke="#0b2d86" stroke-width="3"></circle>
-                        <path d="M46 45l7 7" stroke="#0b2d86" stroke-width="4" stroke-linecap="round"></path>
-                        <rect x="52" y="50" width="10" height="6" rx="3" transform="rotate(45 52 50)" fill="#ff6c62"></rect>
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
                     </svg>
                 </button>
                 <input id="fileInput" type="file" accept=".pdf,.docx,.xlsx" hidden>
                 <textarea id="message" rows="1"
-                          placeholder="Напишите сообщение..."></textarea>
-                <button id="sendBtn">➤</button>
+                          placeholder="Напишите сообщение..."
+                          aria-label="Введите сообщение"></textarea>
+                <button id="sendBtn" type="button" aria-label="Отправить сообщение">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                </button>
             </div>
-            <div id="fileStatus" class="file-status">Режим: общий чат</div>
+            <div id="fileStatus" class="file-status" role="status">Режим: общий чат</div>
         </div>
 
-    </div>
+    </main>
 
 </div>
 
