@@ -577,6 +577,7 @@ class ChatService:
 
             context = ""
             sources = []
+            source_texts = {}
             current_length = 0
 
             for r in filtered_results:
@@ -593,7 +594,16 @@ class ChatService:
 
                 context += formatted + "\n"
                 current_length += len(formatted)
-                sources.append(r["source"])
+                
+                # Сохраняем текст чанка для источников
+                source_name = r["source"]
+                if source_name not in source_texts:
+                    source_texts[source_name] = []
+                source_texts[source_name].append({
+                    "text": chunk[:800],  # Ограничиваем длину
+                    "score": r.get("score", 0)
+                })
+                sources.append(source_name)
 
             context_chars = len(context)
             sources_count = len(set(sources))
@@ -669,7 +679,7 @@ class ChatService:
             self._append_generation_chunk(request_id, "\n###SOURCES###\n")
             self._append_generation_chunk(
                 request_id,
-                json.dumps(list(set(sources))),
+                json.dumps(source_texts),
             )
             self._append_generation_chunk(request_id, "\n###CONFIDENCE###\n")
             self._append_generation_chunk(request_id, str(round(final_confidence, 3)))

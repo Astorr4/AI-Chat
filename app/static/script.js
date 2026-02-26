@@ -386,6 +386,18 @@ async function consumeAssistantStream({
     }
 
     applyAssistantMeta(contentDiv, sources, confidence);
+    
+    // Обновляем панель источников
+    if (typeof sources === "object" && !Array.isArray(sources)) {
+        renderSourcesPanel(sources);
+    } else if (Array.isArray(sources) && sources.length > 0) {
+        // Обратная совместимость со старой структурой
+        const legacySources = {};
+        sources.forEach(s => {
+            legacySources[s] = [{ text: "Текст недоступен", score: 0 }];
+        });
+        renderSourcesPanel(legacySources);
+    }
 
     if (msg) {
         msg.html = sanitizeHtml(contentDiv.innerHTML);
@@ -481,6 +493,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     resumePendingStreamsForCurrentSession();
     setupFileAnalysisUI();
+    
+    // Инициализация панели источников
+    initSourcesPanel();
+    updateSourcesFromLastMessage();
 
     focusInput();
 });
@@ -820,6 +836,9 @@ function loadSession(id) {
     chat.scrollTop = chat.scrollHeight;
     renderHistory();
     focusInput();
+    
+    // Обновляем панель источников
+    updateSourcesFromLastMessage();
 }
 
 // =========================
@@ -946,6 +965,112 @@ function deleteSession(id) {
 function saveSessions() {
     localStorage.setItem("sessions",
         JSON.stringify(sessions));
+}
+
+// =========================
+// SOURCES PANEL
+// =========================
+
+let currentSources = {};
+
+function initSourcesPanel() {
+    const toggleBtn = document.getElementById("sourcesToggle");
+    const panel = document.getElementById("sourcesPanel");
+    
+    if (toggleBtn && panel) {
+        toggleBtn.addEventListener("click", () => {
+            panel.classList.toggle("collapsed");
+        });
+    }
+}
+
+function renderSourcesPanel(sources) {
+    currentSources = sources || {};
+    const sourcesList = document.getElementById("sourcesList");
+    const sourcesCount = document.getElementById("sourcesCount");
+    
+    if (!sourcesList || !sourcesCount) return;
+    
+    const sourceNames = Object.keys(sources);
+    sourcesCount.textContent = sourceNames.length;
+    
+    if (sourceNames.length === 0) {
+        sourcesList.innerHTML = `
+            <div class="source-empty">
+                <div class="source-empty-icon">📄</div>
+                <div>Нет источников</div>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = "";
+    sourceNames.forEach((sourceName, index) => {
+        const chunks = sources[sourceName] || [];
+        const chunksHtml = chunks.map(chunk => {
+            const score = chunk.score ? Math.round(chunk.score * 100) : 0;
+            const text = chunk.text.length > 300 
+                ? chunk.text.substring(0, 300) + "..." 
+                : chunk.text;
+            return `
+                <div class="source-chunk">
+                    <div class="source-chunk-score">Релевантность: ${score}%</div>
+                    ${escapeHtml(text)}
+                </div>
+            `;
+        }).join("");
+        
+        html += `
+            <div class="source-item${index === 0 ? ' expanded' : ''}" data-source="${escapeHtml(sourceName)}">
+                <div class="source-header" onclick="toggleSource(this)">
+                    <span class="source-name">${escapeHtml(sourceName)}</span>
+                    <span class="source-expand">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </span>
+                </div>
+                <div class="source-chunks">
+                    ${chunksHtml}
+                </div>
+            </div>
+        `;
+    });
+    
+    sourcesList.innerHTML = html;
+}
+
+function toggleSource(headerEl) {
+    const sourceItem = headerEl.closest(".source-item");
+    if (sourceItem) {
+        sourceItem.classList.toggle("expanded");
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function updateSourcesFromLastMessage() {
+    if (!sessionId || !sessions[sessionId]) return;
+    
+    const messages = sessions[sessionId].messages || [];
+    let lastSources = {};
+    
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg.role === "assistant" && msg.sources) {
+            // Проверяем новую структуру (объект с текстами чанков)
+            if (typeof msg.sources === "object" && !Array.isArray(msg.sources)) {
+                lastSources = msg.sources;
+            }
+            break;
+        }
+    }
+    
+    renderSourcesPanel(lastSources);
 }
 
 
